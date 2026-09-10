@@ -1,5 +1,7 @@
 // Nội dung skill-tree Solution Architect. Tách khỏi UI để dễ bảo trì.
 
+export type Lang = "vi" | "en";
+
 export type Tier = { id: number; n: string; t: string; sub: string };
 export type QA = { q: string; a: string };
 export type NodeLink = { t: string; u: string };

@@ -1,22 +1,44 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NODES, TIERS, RANKS, type SkillNode } from "@/lib/content";
+import { type SkillNode, type Lang } from "@/lib/content";
+import { getData, UI, type UIStrings } from "@/lib/i18n";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { useProgress } from "@/lib/useProgress";
 
-function rankFor(xp: number): [number, string] {
-  let r = RANKS[0];
-  for (const x of RANKS) if (xp >= x[0]) r = x;
+const LANG_KEY = "sa-lang";
+
+function rankFor(xp: number, ranks: [number, string][]): [number, string] {
+  let r = ranks[0];
+  for (const x of ranks) if (xp >= x[0]) r = x;
   return r;
 }
 
 export default function SkillTree() {
   const { cleared, clearNode, reset, user, status, signIn, signOut } = useProgress();
+  const [lang, setLang] = useState<Lang>("vi");
   const [selected, setSelected] = useState<SkillNode | null>(null);
   const [toast, setToast] = useState<{ html: string; show: boolean }>({ html: "", show: false });
   const [shakeId, setShakeId] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Ngôn ngữ: nạp từ localStorage sau khi mount (tránh lệch hydration).
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LANG_KEY) as Lang | null;
+      if (saved === "vi" || saved === "en") setLang(saved);
+    } catch {}
+  }, []);
+  const changeLang = useCallback((l: Lang) => {
+    setLang(l);
+    try {
+      localStorage.setItem(LANG_KEY, l);
+    } catch {}
+  }, []);
+
+  const ui = UI[lang];
+  const { nodes: NODES, tiers: TIERS, ranks: RANKS } = useMemo(() => getData(lang), [lang]);
+  const nodeById = useMemo(() => new Map(NODES.map((n) => [n.id, n])), [NODES]);
 
   const showToast = useCallback((html: string) => {
     setToast({ html, show: true });
@@ -30,15 +52,18 @@ export default function SkillTree() {
 
   const xp = useMemo(
     () => NODES.filter((n) => cleared.has(n.id)).reduce((s, n) => s + n.xp, 0),
-    [cleared]
+    [cleared, NODES]
   );
-  const doneCount = useMemo(() => NODES.filter((n) => cleared.has(n.id)).length, [cleared]);
-  const rank = rankFor(xp);
+  const doneCount = useMemo(() => NODES.filter((n) => cleared.has(n.id)).length, [cleared, NODES]);
+  const rank = rankFor(xp, RANKS);
   const rankIdx = RANKS.findIndex((r) => r[1] === rank[1]);
   const nextRank = RANKS[rankIdx + 1];
   const barPct = nextRank
     ? Math.min(100, Math.round(((xp - rank[0]) / (nextRank[0] - rank[0])) * 100))
     : 100;
+
+  // Keep the drawer's node in sync with the active language.
+  const selectedLocalized = selected ? nodeById.get(selected.id) ?? null : null;
 
   const onCardClick = (n: SkillNode) => {
     const avail = isAvailable(n);
@@ -46,7 +71,7 @@ export default function SkillTree() {
     if (!avail && !done) {
       setShakeId(null);
       requestAnimationFrame(() => setShakeId(n.id));
-      showToast(`🔒 Cần clear trước: <b>${missing(n).join(", ")}</b>`);
+      showToast(ui.lockToast(missing(n).join(", ")));
       return;
     }
     setSelected(n);
@@ -54,24 +79,19 @@ export default function SkillTree() {
 
   const onClear = (n: SkillNode) => {
     if (cleared.has(n.id)) return;
-    const before = new Set(
-      NODES.filter((x) => isAvailable(x) && !isCleared(x.id)).map((x) => x.id)
-    );
+    const before = new Set(NODES.filter((x) => isAvailable(x) && !isCleared(x.id)).map((x) => x.id));
     clearNode(n.id);
-    // Tính node mới mở khóa (dựa trên tập cleared sau khi thêm n).
     const nextCleared = new Set(cleared);
     nextCleared.add(n.id);
-    const nowAvail = NODES.filter(
+    const newly = NODES.filter(
       (x) => x.prereq.every((p) => nextCleared.has(p)) && !nextCleared.has(x.id)
-    ).map((x) => x.id);
-    const newly = nowAvail.filter((id) => !before.has(id));
-    let msg = `✓ Clear <b>${n.id}</b> +${n.xp} XP.`;
-    if (newly.length) msg += ` Mở khóa: <b>${newly.join(", ")}</b>`;
-    showToast(msg);
+    )
+      .map((x) => x.id)
+      .filter((id) => !before.has(id));
+    showToast(ui.clearToast(n.id, n.xp, newly));
     setSelected(null);
   };
 
-  // Đóng drawer bằng Escape.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setSelected(null);
@@ -85,39 +105,47 @@ export default function SkillTree() {
       <div className="wrap">
         <div className="hud">
           <div className="brand">
-            <span className="eyebrow">Solution Architect · Career Track</span>
-            <h1>Skill Tree: Dựng hệ Edtech cho 10M người dùng</h1>
-            <p>Clear từng node → mở khóa node liên quan → hạ Boss cuối.</p>
+            <span className="eyebrow">{ui.eyebrow}</span>
+            <h1>{ui.h1}</h1>
+            <p>{ui.tagline}</p>
           </div>
           <div className="stats">
             <div className="stat">
-              <span className="k">Rank</span>
+              <span className="k">{ui.rank}</span>
               <span className="v gold">Lv {rankIdx + 1}</span>
               <span className="rank">{rank[1]}</span>
             </div>
             <div className="stat">
-              <span className="k">XP</span>
+              <span className="k">{ui.xp}</span>
               <span className="v">{xp}</span>
               <div className="bar" style={{ marginTop: 4 }}>
                 <i style={{ width: `${barPct}%` }} />
               </div>
             </div>
             <div className="stat">
-              <span className="k">Tiến độ</span>
+              <span className="k">{ui.progress}</span>
               <span className="v mint">
                 {doneCount} / {NODES.length}
               </span>
             </div>
+            <div className="langtoggle" role="group" aria-label="Language">
+              <button className={lang === "vi" ? "on" : ""} onClick={() => changeLang("vi")}>
+                VI
+              </button>
+              <button className={lang === "en" ? "on" : ""} onClick={() => changeLang("en")}>
+                EN
+              </button>
+            </div>
             <button
               className="btn"
               onClick={() => {
-                if (confirm("Xóa toàn bộ tiến độ đã clear?")) {
+                if (confirm(ui.resetConfirm)) {
                   reset();
-                  showToast("Đã reset tiến độ.");
+                  showToast(ui.resetDone);
                 }
               }}
             >
-              Reset tiến độ
+              {ui.reset}
             </button>
           </div>
         </div>
@@ -128,24 +156,20 @@ export default function SkillTree() {
           status={status}
           onSignIn={signIn}
           onSignOut={signOut}
+          t={ui.auth}
         />
 
-        <p className="intro">
-          Đây là lộ trình tự học có <b>cơ chế khóa</b>: mỗi node là một mảng kiến thức (lý thuyết ·
-          khi nào dùng · ưu/nhược · câu hỏi + đáp án gợi ý · lab · nguồn tiếng Anh uy tín). Hoàn thành
-          node sẽ <b>mở khóa</b> các node phụ thuộc. Ba node <b>Tổng hợp/Boss</b> chỉ mở khi bạn đã nắm
-          các mảnh ghép liên quan — đó là lúc bạn học cách <b>lắp ghép</b> chúng lại.
-        </p>
+        <p className="intro" dangerouslySetInnerHTML={{ __html: ui.intro }} />
 
         <div className="legend">
           <span>
-            <i className="dot l" /> Đang khóa
+            <i className="dot l" /> {ui.legendLocked}
           </span>
           <span>
-            <i className="dot a" /> Có thể học
+            <i className="dot a" /> {ui.legendAvail}
           </span>
           <span>
-            <i className="dot c" /> Đã clear
+            <i className="dot c" /> {ui.legendCleared}
           </span>
         </div>
 
@@ -164,7 +188,7 @@ export default function SkillTree() {
                   const avail = isAvailable(n);
                   const done = isCleared(n.id);
                   const state = done ? "cleared" : avail ? "available" : "locked";
-                  const statusTxt = done ? "Đã clear" : avail ? "Có thể học" : "Đang khóa";
+                  const statusTxt = done ? ui.statusCleared : avail ? ui.statusAvail : ui.statusLocked;
                   return (
                     <button
                       key={n.id}
@@ -185,7 +209,9 @@ export default function SkillTree() {
                       <div className="foot">
                         <span className="xp">+{n.xp} XP</span>
                         {!avail && !done && (
-                          <span className="lockmsg">Cần: {missing(n).join(" · ")}</span>
+                          <span className="lockmsg">
+                            {ui.needPrefix} {missing(n).join(" · ")}
+                          </span>
                         )}
                       </div>
                     </button>
@@ -197,13 +223,19 @@ export default function SkillTree() {
         })}
       </div>
 
-      <div
-        className={`overlay${selected ? " open" : ""}`}
-        onClick={() => setSelected(null)}
+      <div className={`overlay${selected ? " open" : ""}`} onClick={() => setSelected(null)} />
+      <Drawer
+        node={selectedLocalized}
+        cleared={selected ? isCleared(selected.id) : false}
+        onClose={() => setSelected(null)}
+        onClear={onClear}
+        ui={ui}
       />
-      <Drawer node={selected} cleared={selected ? isCleared(selected.id) : false} onClose={() => setSelected(null)} onClear={onClear} />
 
-      <div className={`toast${toast.show ? " show" : ""}`} dangerouslySetInnerHTML={{ __html: toast.html }} />
+      <div
+        className={`toast${toast.show ? " show" : ""}`}
+        dangerouslySetInnerHTML={{ __html: toast.html }}
+      />
     </div>
   );
 }
@@ -215,12 +247,14 @@ function AuthBar({
   status,
   onSignIn,
   onSignOut,
+  t,
 }: {
   configured: boolean;
   email: string | null;
   status: "local" | "syncing" | "synced";
   onSignIn: (email: string) => Promise<{ error: string | null }>;
   onSignOut: () => Promise<void>;
+  t: UIStrings["auth"];
 }) {
   const [value, setValue] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -229,26 +263,29 @@ function AuthBar({
   if (!configured) {
     return (
       <div className="authbar">
-        <span className="pill local">Local-only</span>
-        <span className="msg">
-          Chưa cấu hình Supabase — tiến độ đang lưu trên <b>trình duyệt này</b>. Thêm biến môi trường
-          Supabase để bật đăng nhập + đồng bộ đa thiết bị (xem README).
-        </span>
+        <span className="pill local">{t.localPill}</span>
+        <span className="msg" dangerouslySetInnerHTML={{ __html: t.localMsg }} />
       </div>
     );
   }
 
   if (email) {
     const pill = status === "synced" ? "synced" : status === "syncing" ? "syncing" : "local";
-    const label = status === "synced" ? "Đã đồng bộ" : status === "syncing" ? "Đang đồng bộ…" : "Local";
+    const label =
+      status === "synced" ? t.syncedLabel : status === "syncing" ? t.syncingLabel : t.localLabel;
     return (
       <div className="authbar">
         <span className={`pill ${pill}`}>{label}</span>
-        <span className="msg">
-          Đăng nhập: <b>{email}</b> — tiến độ đồng bộ lên Supabase.
-        </span>
-        <form onSubmit={(e) => { e.preventDefault(); void onSignOut(); }}>
-          <button className="btn" type="submit">Đăng xuất</button>
+        <span className="msg" dangerouslySetInnerHTML={{ __html: t.signedIn(email) }} />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void onSignOut();
+          }}
+        >
+          <button className="btn" type="submit">
+            {t.signOut}
+          </button>
         </form>
       </div>
     );
@@ -256,10 +293,8 @@ function AuthBar({
 
   return (
     <div className="authbar">
-      <span className="pill local">Chưa đăng nhập</span>
-      <span className="msg">
-        {msg ?? "Nhập email để nhận magic link đăng nhập — tiến độ sẽ đồng bộ đa thiết bị."}
-      </span>
+      <span className="pill local">{t.notSignedPill}</span>
+      <span className="msg">{msg ?? t.prompt}</span>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -267,18 +302,18 @@ function AuthBar({
           setSending(true);
           const { error } = await onSignIn(value);
           setSending(false);
-          setMsg(error ? `Lỗi: ${error}` : `Đã gửi magic link tới ${value}. Kiểm tra email!`);
+          setMsg(error ? t.errorPrefix(error) : t.sent(value));
         }}
       >
         <input
           type="email"
           required
-          placeholder="ban@email.com"
+          placeholder={t.emailPlaceholder}
           value={value}
           onChange={(e) => setValue(e.target.value)}
         />
         <button className="btn" type="submit" disabled={sending}>
-          {sending ? "Đang gửi…" : "Gửi magic link"}
+          {sending ? t.sending : t.send}
         </button>
       </form>
     </div>
@@ -291,11 +326,13 @@ function Drawer({
   cleared,
   onClose,
   onClear,
+  ui,
 }: {
   node: SkillNode | null;
   cleared: boolean;
   onClose: () => void;
   onClear: (n: SkillNode) => void;
+  ui: UIStrings;
 }) {
   const [open, setOpen] = useState<Record<number, boolean>>({});
   useEffect(() => {
@@ -311,48 +348,53 @@ function Drawer({
               <div className="code">{node.id}</div>
               <h2>{node.title}</h2>
             </div>
-            <button className="d-close" aria-label="Đóng" onClick={onClose}>
+            <button className="d-close" aria-label="Close" onClick={onClose}>
               ✕
             </button>
           </div>
           <div className="d-body">
-            <h4>Là gì / Cách hoạt động</h4>
+            <h4>{ui.whatIs}</h4>
             <div dangerouslySetInnerHTML={{ __html: node.theory }} />
-            <h4>Khi nào nên / không nên dùng</h4>
+            <h4>{ui.whenUse}</h4>
             <div dangerouslySetInnerHTML={{ __html: node.whenUse }} />
             <div className="prosbox">
               <div className="pro">
-                <h5>Ưu điểm</h5>
-                <ul>{node.pros.map((p, i) => <li key={i}>{p}</li>)}</ul>
+                <h5>{ui.pros}</h5>
+                <ul>
+                  {node.pros.map((p, i) => (
+                    <li key={i}>{p}</li>
+                  ))}
+                </ul>
               </div>
               <div className="con">
-                <h5>Nhược điểm</h5>
-                <ul>{node.cons.map((p, i) => <li key={i}>{p}</li>)}</ul>
+                <h5>{ui.cons}</h5>
+                <ul>
+                  {node.cons.map((p, i) => (
+                    <li key={i}>{p}</li>
+                  ))}
+                </ul>
               </div>
             </div>
 
-            {node.calc && <Calculator />}
+            {node.calc && <Calculator ui={ui} />}
 
-            <h4>Câu hỏi kiểm tra &amp; đáp án gợi ý</h4>
+            <h4>{ui.questions}</h4>
             {node.questions.map((q, i) => (
               <div className="q" key={i}>
                 <p className="qq">
-                  <b>Q{i + 1}.</b> {q.q}
+                  <b>{ui.qLabel(i + 1)}</b> {q.q}
                 </p>
-                <button
-                  className="reveal"
-                  onClick={() => setOpen((o) => ({ ...o, [i]: !o[i] }))}
-                >
-                  {open[i] ? "Ẩn đáp án ▴" : "Xem đáp án gợi ý ▾"}
+                <button className="reveal" onClick={() => setOpen((o) => ({ ...o, [i]: !o[i] }))}>
+                  {open[i] ? ui.revealHide : ui.revealShow}
                 </button>
                 {open[i] && <div className="ans" dangerouslySetInnerHTML={{ __html: q.a }} />}
               </div>
             ))}
 
-            <h4>Lab thực hành</h4>
+            <h4>{ui.lab}</h4>
             <div className="lab" dangerouslySetInnerHTML={{ __html: node.lab }} />
 
-            <h4>Nguồn đọc thêm (EN, chọn lọc)</h4>
+            <h4>{ui.sources}</h4>
             <div className="links">
               {node.links.map((l, i) => (
                 <a key={i} href={`https://${l.u}`} target="_blank" rel="noopener noreferrer">
@@ -367,16 +409,16 @@ function Drawer({
             {cleared ? (
               <>
                 <button className="clearbtn done" disabled>
-                  ✓ Đã clear node này
+                  {ui.clearedBtn}
                 </button>
-                <span className="prereq-note">+{node.xp} XP đã nhận</span>
+                <span className="prereq-note">{ui.xpEarned(node.xp)}</span>
               </>
             ) : (
               <>
                 <button className="clearbtn" onClick={() => onClear(node)}>
-                  Đánh dấu ĐÃ CLEAR (+{node.xp} XP)
+                  {ui.clearBtn(node.xp)}
                 </button>
-                <span className="prereq-note">Nên đọc lý thuyết + thử trả lời câu hỏi trước</span>
+                <span className="prereq-note">{ui.clearHint}</span>
               </>
             )}
           </div>
@@ -387,7 +429,8 @@ function Drawer({
 }
 
 /* ---------------- Capacity calculator ---------------- */
-function Calculator() {
+function Calculator({ ui }: { ui: UIStrings }) {
+  const c = ui.calc;
   const [rps, setRps] = useState(6000);
   const [lat, setLat] = useState(150);
   const [core, setCore] = useState(4);
@@ -399,31 +442,31 @@ function Calculator() {
   const pool = core * 2 + 1;
 
   const cells: [string, number | string, string][] = [
-    ["In-flight (L=λ×W)", inflight, "request đồng thời"],
-    ["Worker/slot (70%)", workers, "đã cộng headroom"],
-    ["Số node (N+1)", nodes, `@${cap} rps/node, 70%`],
-    ["DB pool / node", pool, "nhỏ + PgBouncer"],
+    [c.cInflight, inflight, c.cInflightSub],
+    [c.cWorker, workers, c.cWorkerSub],
+    [c.cNodes, nodes, c.cNodesSub(cap)],
+    [c.cPool, pool, c.cPoolSub],
   ];
 
   return (
     <>
-      <h4>Máy tính Capacity (Little&apos;s Law + headroom)</h4>
+      <h4>{ui.calcHeading}</h4>
       <div className="calc">
         <div className="row">
           <label>
-            RPS peak
+            {c.rpsPeak}
             <input type="number" min={1} value={rps} onChange={(e) => setRps(+e.target.value)} />
           </label>
           <label>
-            p95 latency (ms)
+            {c.p95}
             <input type="number" min={1} value={lat} onChange={(e) => setLat(+e.target.value)} />
           </label>
           <label>
-            CPU cores / node
+            {c.cores}
             <input type="number" min={1} value={core} onChange={(e) => setCore(+e.target.value)} />
           </label>
           <label>
-            Cap / node (req/s)
+            {c.capNode}
             <input type="number" min={1} value={cap} onChange={(e) => setCap(+e.target.value)} />
           </label>
         </div>
@@ -436,11 +479,7 @@ function Calculator() {
             </div>
           ))}
         </div>
-        <p className="note">
-          Quy tắc: giữ utilization ~70% (không 100%), luôn +1 node dự phòng (N+1). Pool DB nhỏ +
-          PgBouncer thay vì pool khổng lồ. Đổi latency 2× để thấy nhu cầu cấu hình nhảy — lý do phải
-          load test trước khi chốt.
-        </p>
+        <p className="note">{c.note}</p>
       </div>
     </>
   );
