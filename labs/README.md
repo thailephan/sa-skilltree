@@ -22,6 +22,11 @@ Tắt: `docker compose down` (thêm `-v` để xóa cả dữ liệu).
 | **FLT-09** Idempotency | Retry cùng key không tạo bản ghi kép | xem *Lab 3* |
 | **SHD-05** Sharding | Citus: single-shard vs scatter-gather | xem *Lab 4* |
 | **INF-10** On-prem/S3 | MinIO = S3-compatible | xem *Lab 5* |
+| **GTW-06** API Gateway | Nginx rate-limit → HTTP 429 | xem *Lab 6* |
+| **OBS-14** Observability | Prometheus + Grafana (RED dashboard) | xem *Lab 7* |
+| **FLT-09/SYN-B** Chaos | Giết/pause DB, xem hệ hỏng & hồi | xem *Lab 8* |
+
+> **Cổng:** `localhost:8080` = qua **gateway** (có rate-limit); `localhost:8081` = **api trực tiếp** (để so sánh). Grafana `localhost:3300`, Prometheus `localhost:9090`.
 
 ---
 
@@ -73,6 +78,37 @@ docker compose exec -T coordinator psql -U sa -d edtech < setup.sql
 - Endpoint S3-compatible: `http://localhost:9000`. Trỏ AWS SDK/`aws --endpoint-url http://localhost:9000` vào đây — **cùng code như S3 thật**, chỉ khác endpoint → minh chứng "đổi hạ tầng, không đổi code".
 
 ---
+
+### Lab 6 — GTW-06 API Gateway + rate-limit
+Gateway (Nginx) giới hạn **5 req/s/IP, burst 10**. Bắn nhanh để thấy bị chặn 429:
+```bash
+for i in $(seq 1 20); do curl -s -o /dev/null -w "%{http_code} " localhost:8080/courses/1; done; echo
+# → vài 200 rồi 429 429 429... (qua gateway). So với api trực tiếp (không rate-limit):
+for i in $(seq 1 20); do curl -s -o /dev/null -w "%{http_code} " localhost:8081/courses/1; done; echo
+```
+Xem header `X-Served-By: gateway`: `curl -i localhost:8080/health | grep -i served-by`.
+
+### Lab 7 — OBS-14 Observability (Prometheus + Grafana)
+```bash
+docker compose --profile obs up -d prometheus grafana
+# tạo tải để có số liệu:
+docker compose run --rm k6 run --vus 20 --duration 30s /scripts/course-load.js
+```
+- Prometheus: <http://localhost:9090> (thử query `sum(rate(http_requests_total[1m]))`).
+- Grafana: <http://localhost:3300> → dashboard **"Demo API — RED"** (Rate / Errors / p95) đã provision sẵn.
+- API expose `/metrics`: `curl localhost:8081/metrics | head`.
+> Bài học: alert theo **p95/errors** (triệu chứng user) — xem OBS-14 trong app.
+
+### Lab 8 — Chaos (FLT-09 / SYN-B)
+Chứng minh "design for failure" bằng thực nghiệm. Vừa chạy tải vừa gây sự cố:
+```bash
+docker compose run --rm k6 run --vus 20 --duration 40s /scripts/course-load.js &   # nền
+docker compose pause postgres      # DB "đơ" → quan sát error rate tăng (Grafana)
+sleep 8
+docker compose unpause postgres    # phục hồi → xem hệ tự hồi
+# hoặc khắc nghiệt hơn: docker compose kill api && docker compose up -d api  (self-heal)
+```
+Quan sát trên Grafana: errors nhảy khi pause, p95 tăng, rồi hồi khi unpause. Đây chính là bằng chứng SLA của SYN-B.
 
 ## Ghi chú
 - Thư mục `labs/` độc lập với app Next.js — không ảnh hưởng build/deploy Vercel.

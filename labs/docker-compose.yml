@@ -51,10 +51,18 @@ services:
       CACHE_TTL: "60"
       PG_POOL: "10"
       PORT: "8080"
-    ports: ["8080:8080"]
+    ports: ["8081:8080"] # truy cập TRỰC TIẾP api ở host 8081 (bỏ qua gateway) để so sánh
     volumes:
       - ./api:/app
     command: sh -c "npm install --no-audit --no-fund --silent && node server.js"
+
+  # GTW-06: API Gateway (Nginx) + rate-limit, đứng trước api. Host 8080 → gateway.
+  gateway:
+    image: nginx:1.27-alpine
+    depends_on: [api]
+    ports: ["8080:8080"]
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
 
   k6:
     image: grafana/k6:latest
@@ -81,6 +89,28 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  # OBS-14: Prometheus + Grafana. Bật: docker compose --profile obs up -d prometheus grafana
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: ["obs"]
+    depends_on: [api]
+    ports: ["9090:9090"]
+    volumes:
+      - ./obs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles: ["obs"]
+    depends_on: [prometheus]
+    ports: ["3300:3000"] # host 3300 (tránh 3000/3001 đang bận); mở http://localhost:3300
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./obs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./obs/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
 volumes:
   pgdata:

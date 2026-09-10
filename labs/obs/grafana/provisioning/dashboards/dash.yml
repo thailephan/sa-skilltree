@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: "SA Labs"
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
