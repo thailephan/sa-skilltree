@@ -374,6 +374,133 @@ const EN: Record<string, Localized> = {
       { t: "Google SRE Book — Addressing Cascading Failures", u: "sre.google/sre-book/addressing-cascading-failures" },
     ],
   },
+  "DDD-16": {
+    title: "DDD & Bounded Contexts",
+    sum: "Split services by business domain, not by technical layer.",
+    theory: `<p><b>Domain-Driven Design</b> = design software around <b>business language & boundaries</b>. A <b>Bounded Context</b> is a boundary within which one model + vocabulary is consistent (e.g. 'Course' in Catalog differs from 'Course' in Enrollment).</p>
+ <p>Split microservices <b>by bounded context</b> (Identity · Catalog · Enrollment · Payment · Progress) — each context <b>owns its data, no shared DB</b>, communicating via API/events. Core concepts: <b>ubiquitous language</b> (shared dev↔business vocabulary), <b>aggregate</b> (transactional consistency cluster), <b>context map</b> (relationships: partnership, ACL to prevent model leakage).</p>
+ <p>This answers 'where do I cut microservices'. Cutting wrong (by technical layer: UserService/EmailService/DBService) → a <b>distributed monolith</b> (tight coupling PLUS network latency — the worst of both).</p>`,
+    whenUse: `<p>When breaking a monolith → microservices or designing a multi-team system. You don't need heavy DDD for small CRUD / a single team.</p>`,
+    pros: ["Clear boundaries → low coupling, autonomous teams", "Shared language reduces dev↔business misunderstanding", "Guides where to actually cut services"],
+    cons: ["Steep learning curve, easy to over-model", "Wrong context split → painful merges/splits later", "Requires deep business understanding, not purely technical"],
+    questions: [
+      { q: "You plan to split 'UserService, EmailService, DatabaseService'. What's wrong?",
+        a: "That's splitting by <strong>technical layer</strong>, not <strong>business domain</strong>. One business operation (e.g. 'enroll in a course') would call across all three → tight coupling + network latency = a <strong>distributed monolith</strong>. Right way: split by bounded context (Enrollment, Catalog, Payment) — each self-contains its domain logic + data." },
+      { q: "Why should each bounded context own its DB instead of sharing one?",
+        a: "A shared DB creates <strong>implicit coupling through the schema</strong>: changing a table in service A breaks service B, and you can't scale/deploy independently. Owned data + API/event communication lets each context <strong>change its model, pick its DB type, and scale independently</strong> — the whole point of microservices." },
+    ],
+    lab: `<span class="tag">Lab</span><p style="margin-top:8px">Draw a context map for edtech: list 5 bounded contexts, each with [main aggregate | owned data | 1-2 domain events it emits]. Then point out one place where a wrong split would create a distributed monolith.</p>`,
+    links: [
+      { t: "Martin Fowler — Bounded Context", u: "martinfowler.com/bliki/BoundedContext.html" },
+      { t: "microservices.io — Decompose by subdomain", u: "microservices.io/patterns/decomposition/decompose-by-subdomain.html" },
+      { t: "Microsoft — DDD-oriented microservices", u: "learn.microsoft.com/azure/architecture/microservices/model/domain-analysis" },
+    ],
+  },
+  "API-12": {
+    title: "API Design & Versioning",
+    sum: "REST/gRPC/GraphQL, versioning, pagination, backward-compatible contracts.",
+    theory: `<p><b>Contract-first:</b> design the API contract (OpenAPI/proto) first — client & server work in parallel. <b>Pick a style:</b> REST (public, simple) · gRPC (service↔service, performance, streaming) · GraphQL (clients need flexible queries, but N+1/caching complexity).</p>
+ <p><b>Versioning & compatibility:</b> prefer <b>backward-compatible</b> changes (add optional fields, NEVER remove/rename/change meaning) → no version bump needed. Only bump the version (URI <code>/v2</code> or header) for a <b>breaking change</b>. <b>Pagination:</b> cursor &gt; offset at scale. Also: consistent error format, idempotency key for POST, rate-limiting, filtering.</p>`,
+    whenUse: `<p>Every shared API (public or internal multi-team). gRPC for internal performance; REST for public; GraphQL when clients have diverse data needs.</p>`,
+    pros: ["Stable contract → teams/clients build in parallel", "Versioning avoids breaking old clients", "gRPC is fast + type-safe for internal calls"],
+    cons: ["Maintaining many versions is a burden", "GraphQL is prone to N+1 + hard to cache", "A bad contract is hard to fix once clients depend on it"],
+    questions: [
+      { q: "You need to add one field to a response — do you have to bump to v2?",
+        a: "<strong>No</strong>, if you add an <strong>optional field</strong> (backward-compatible) — old clients ignore it and keep working. Only bump for a <strong>breaking</strong> change: removing a field, changing its type/meaning, or adding a required field. Rule: 'adding is fine; changing/removing needs versioning'." },
+      { q: "Why is cursor pagination better than offset on a large table?",
+        a: "<code>OFFSET 1000000</code> forces the DB to scan & discard a million rows → slower per page; and if data changes between pages you get duplicates/misses. A <strong>cursor</strong> (using a stable key like the last item's id/created_at) seeks straight to the spot → fast and stable no matter how deep." },
+    ],
+    lab: `<span class="tag">Lab</span><p style="margin-top:8px">Write OpenAPI for 3 course endpoints (list/get/enroll). Design a v1→v2 change that is both backward-compatible (add a field) and breaking (change a field), and classify each. Convert the list endpoint from offset to cursor pagination.</p>`,
+    links: [
+      { t: "Microsoft — API design best practices", u: "learn.microsoft.com/azure/architecture/best-practices/api-design" },
+      { t: "Google — API Improvement Proposals (AIP)", u: "google.aip.dev" },
+      { t: "Stripe — API versioning approach", u: "stripe.com/blog/api-versioning" },
+    ],
+  },
+  "MSG-13": {
+    title: "Message Queue & Async",
+    sum: "Kafka/RabbitMQ, at-least-once, transactional outbox, DLQ.",
+    theory: `<p><b>Asynchronous</b> communication to decouple & absorb load. <b>Queue</b> (RabbitMQ/SQS: one message → one consumer, task processing) vs <b>Log</b> (Kafka: many consumers, replay, event streaming).</p>
+ <p><b>Delivery:</b> the default is <b>at-least-once</b> → messages can duplicate → consumers must be <b>idempotent</b>. <b>Ordering</b> is only guaranteed within a partition. A <b>DLQ</b> (dead-letter queue) holds poison messages so they don't block the queue. <b>Transactional outbox:</b> write data + event in the SAME DB transaction (into an outbox table), a relay/CDC publishes later → no lost events on crash. Monitor <b>consumer lag</b> (KEDA scales on it).</p>`,
+    whenUse: `<p>When you need decoupling, spike absorption (buffer), fan-out, or background work (email, video encode, updating read models). DON'T use it for flows that need an instant synchronous reply to the user.</p>`,
+    pros: ["Decouples + absorbs traffic spikes", "Consumers scale independently; Kafka allows replay", "Better fault tolerance (retry via queue)"],
+    cons: ["Eventual consistency + hard to debug (async flow)", "You must handle idempotency / DLQ / ordering yourself", "More infrastructure to operate"],
+    questions: [
+      { q: "A consumer receives the same message twice (at-least-once). How do you handle it?",
+        a: "Make the <strong>consumer idempotent</strong>: dedupe by message id / a processed business key, or design a naturally idempotent operation (upsert instead of insert). Never assume 'each message is processed exactly once' — at-least-once is the practical default." },
+      { q: "'Write to DB then publish an event' can lose the event if it crashes between the two steps. Fix?",
+        a: "<strong>Transactional outbox:</strong> in the same transaction that writes the data, also write the event into an <code>outbox</code> table. A relay process (or CDC like Debezium) reads the outbox and publishes to the broker afterward. Since data + event commit atomically, there's no lost-event window. (The opposite is the 'dual write' anti-pattern — the source of lost events.)" },
+    ],
+    lab: `<span class="tag">Lab · use the kafka profile</span><p style="margin-top:8px">Enable Kafka in the labs (<code>docker compose --profile kafka up -d kafka</code>). Write a producer emitting 'enroll-event' and a consumer updating a counter table. Send a duplicate message → prove the consumer is idempotent. Kill the consumer mid-run, watch consumer lag, then see it catch up on restart.</p>`,
+    links: [
+      { t: "Confluent — Kafka introduction", u: "developer.confluent.io/what-is-apache-kafka" },
+      { t: "microservices.io — Transactional Outbox", u: "microservices.io/patterns/data/transactional-outbox.html" },
+      { t: "AWS — SQS vs SNS vs Kinesis", u: "aws.amazon.com/blogs/aws/choosing-between-messaging-services-for-serverless-applications" },
+    ],
+  },
+  "SEC-15": {
+    title: "Security & AuthZ",
+    sum: "AuthN vs AuthZ, RBAC/ABAC, JWT/OAuth2, secrets, OWASP.",
+    theory: `<p><b>Authentication</b> (who you are) differs from <b>Authorization</b> (what you're allowed to do). <b>OAuth2/OIDC</b> is the standard for login/delegation. <b>JWT</b> (stateless, easy to scale but hard to revoke → short TTL + refresh token + blocklist) vs <b>session</b> (easy to revoke but needs a shared store like Redis).</p>
+ <p><b>Authorization:</b> RBAC (by role) vs ABAC (by attribute/context). Principles: <b>least privilege</b> + <b>deny by default</b>. Keep <b>secrets</b> in Vault/Secrets Manager, NEVER hardcode. Encrypt <b>in-transit (TLS)</b> & <b>at-rest</b>. Know the <b>OWASP Top 10</b> (Broken Access Control, Injection...). Multi-tenant: isolate with <b>RLS</b> (as Supabase does in this very app).</p>`,
+    whenUse: `<p>Every system with users / sensitive data — design it <b>from day one</b>, not 'add later'. Retrofitted security is always costly and leaky.</p>`,
+    pros: ["Protects data + meets compliance", "Least-privilege/RLS shrinks the blast radius of a breach", "Standards (OAuth2/OIDC) are reusable"],
+    cons: ["Adds complexity + a little latency", "JWT revocation is hard; a misconfig is a serious hole", "Requires ongoing discipline (patching, key rotation)"],
+    questions: [
+      { q: "JWT vs session — what's the trade-off and when do you pick each?",
+        a: "<strong>JWT</strong> is stateless → easy horizontal scaling (no shared store), but <strong>hard to revoke</strong> before expiry (use short TTL + refresh token + a blocklist when needed). <strong>Session</strong> revokes instantly but needs a shared store (Redis). Public APIs/microservices usually pick JWT; a traditional monolithic web app fits sessions." },
+      { q: "What is 'Broken Access Control' (IDOR), and how do you prevent it?",
+        a: "A user accesses a resource <strong>that isn't theirs</strong> by changing an id (e.g. /orders/123 → /orders/124). Prevent it by checking <strong>authorization at the service layer based on ownership context</strong> (never trust client-supplied params), enabling <strong>RLS at the DB</strong>, and <strong>deny-by-default</strong>. Never rely on 'the client doesn't show that button'." },
+    ],
+    lab: `<span class="tag">Lab</span><p style="margin-top:8px">On the app's own Supabase: confirm RLS on <code>user_progress</code> blocks cross-user reads (sign in with 2 accounts, try to query each other). Decode a JWT (jwt.io) and inspect claims (sub/role/exp). List 3 OWASP Top 10 items relevant to edtech and how to prevent each.</p>`,
+    links: [
+      { t: "OWASP Top 10", u: "owasp.org/www-project-top-ten" },
+      { t: "Auth0 — RBAC vs ABAC", u: "auth0.com/docs/manage-users/access-control" },
+      { t: "OWASP — Authentication Cheat Sheet", u: "cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html" },
+    ],
+  },
+  "OBS-14": {
+    title: "Observability",
+    sum: "Metrics/logs/traces, RED/USE, SLI/SLO, alerting done right.",
+    theory: `<p>Three pillars: <b>Metrics</b> (cheap aggregate numbers — Prometheus), <b>Logs</b> (structured, detailed events — Loki/ELK), <b>Traces</b> (a request's path across services — OpenTelemetry/Jaeger). Attach a <b>correlation id</b> to tie all three together.</p>
+ <p><b>Frameworks:</b> <b>RED</b> (Rate/Errors/Duration) for services; <b>USE</b> (Utilization/Saturation/Errors) for resources. <b>SLI → SLO → error budget</b>: define your service level and its error budget. <b>Alert on user-facing symptoms</b> (SLO burn, p99) — NOT on causes (CPU 90%) to avoid alert fatigue.</p>`,
+    whenUse: `<p>From when you have &gt;1 service / go to production. 'If you can't measure it, you can't operate it' — it's also the foundation for reading load/chaos test results (TST-11, SYN-B).</p>`,
+    pros: ["Find & localize incidents fast (traces point to the slow service)", "Know whether you meet SLA (data, not gut feel)", "Foundation for autoscaling on custom metrics"],
+    cons: ["High metric/log storage cost", "Bad alerting → fatigue, missed real alerts", "More infra + code instrumentation"],
+    questions: [
+      { q: "Metrics vs logs vs traces — what question does each answer?",
+        a: "<strong>Metrics</strong>: 'is there a problem and how bad' (RPS, p99, error rate — aggregate, cheap, good for alerts). <strong>Logs</strong>: 'what exactly happened at one event' (detailed, for investigation). <strong>Traces</strong>: 'which services did a request pass through, where was it slow/failing' (cross-service). Use metrics to detect, traces to localize, logs to dig into detail." },
+      { q: "Alert when p99 breaches the SLO, or when 'CPU 90%'? Why?",
+        a: "Alert on <strong>p99 breaching the SLO</strong> — that's a <strong>user-facing symptom</strong>. CPU at 90% may be perfectly fine (running efficiently). Alerting on causes (CPU/RAM) creates <strong>noise</strong> and misses what matters. Use USE (CPU/saturation) to <em>investigate</em> after an SLO alert fires, not as the primary alert condition." },
+    ],
+    lab: `<span class="tag">Lab · pairs with #4</span><p style="margin-top:8px">Add Prometheus + Grafana to the labs, scrape the demo API. Build a RED dashboard (Rate/Errors/Duration). Run k6 and watch p99 in real time. Create an alert for p99 &gt; 200ms. Compare 'seeing the numbers' vs 'guessing'.</p>`,
+    links: [
+      { t: "Google SRE — Service Level Objectives", u: "sre.google/sre-book/service-level-objectives" },
+      { t: "The RED Method (Grafana/Weaveworks)", u: "grafana.com/blog/2018/08/02/the-red-method-how-to-instrument-your-services" },
+      { t: "OpenTelemetry — docs", u: "opentelemetry.io/docs" },
+    ],
+  },
+  "FIN-17": {
+    title: "Cost & FinOps",
+    sum: "Cost is a design constraint — estimate & control it.",
+    theory: `<p>Cost is an <b>architectural constraint</b> on par with latency/reliability, not just an accounting concern. Optimization axes: <b>compute</b> (right-sizing, autoscale, spot/reserved), <b>storage tiering</b> (hot/cold), <b>data transfer/egress</b> (the hidden culprit, especially video), <b>managed vs self-host</b> (compute total cost of ownership including engineer time).</p>
+ <p><b>Unit economics:</b> $/DAU, $/1000 requests — know what one user 'costs' to price & scale profitably. <b>Cost allocation tags</b> + <b>budget alerts</b>. Remember: <b>cache/CDN cut both latency AND cost</b> at once. Beware optimizing cost too early and slowing product velocity.</p>`,
+    whenUse: `<p>When choosing instances/services and in periodic reviews; especially early for budget-tight startups. Don't optimize cost aggressively while still finding product-market fit.</p>`,
+    pros: ["Avoids bill shock, decisions have a financial basis", "Unit economics support pricing & fundraising", "Cache/CDN: one move wins both cost and latency"],
+    cons: ["Optimizing cost too early hurts speed & simplicity", "Measuring/allocating cost is complex", "Can conflict with reliability (cutting redundancy to save)"],
+    questions: [
+      { q: "What is egress, and why does it cause bill shock for video-heavy edtech?",
+        a: "Egress = the fee for moving data <strong>OUT to the internet (and cross-AZ)</strong>. Large video/images × millions of views → a huge transfer bill (often forgotten in estimates). Reduce it with a <strong>CDN</strong>: caching at the edge means most requests never hit the origin → sharply lower egress and latency." },
+      { q: "Managed (RDS) is pricier than self-hosted Postgres — when do you still pick managed?",
+        a: "When the <strong>total cost of ownership</strong> (engineer time for HA/backup/patch/failover + downtime risk) is <strong>greater than</strong> the price difference. Small team / spiky load / no DB expertise → managed is usually cheaper overall. Don't compare just the sticker price of a service against a bare VM." },
+    ],
+    lab: `<span class="tag">Lab</span><p style="margin-top:8px">Use the AWS Pricing Calculator to estimate a monthly bill for 1M-DAU edtech: compute + storage + <b>egress</b> (include video). Compute the <b>$/DAU</b>. Identify the biggest line item and one way to cut it (usually a CDN for egress).</p>`,
+    links: [
+      { t: "AWS Well-Architected — Cost Optimization Pillar", u: "docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/welcome.html" },
+      { t: "FinOps Foundation — Framework", u: "finops.org/framework" },
+      { t: "AWS Pricing Calculator", u: "calculator.aws" },
+    ],
+  },
   "BOSS": {
     title: "★ BOSS: Design Edtech for 10M users",
     sum: "Capstone: assemble every piece into one defensible architecture.",
