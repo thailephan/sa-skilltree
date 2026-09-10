@@ -83,6 +83,21 @@ export type UIStrings = {
     syncingLabel: string;
     localLabel: string;
   };
+  quiz: {
+    open: string;
+    title: string;
+    due: string;
+    mastered: string;
+    weak: string;
+    reveal: string;
+    correct: string;
+    wrong: string;
+    empty: string;
+    emptyHint: string;
+    noCleared: string;
+    progress: (a: number, b: number) => string;
+    close: string;
+  };
 };
 
 export const UI: Record<Lang, UIStrings> = {
@@ -158,6 +173,21 @@ export const UI: Record<Lang, UIStrings> = {
       syncingLabel: "Đang đồng bộ…",
       localLabel: "Local",
     },
+    quiz: {
+      open: "Ôn tập",
+      title: "Ôn tập (spaced repetition)",
+      due: "Cần ôn",
+      mastered: "Đã thuộc",
+      weak: "Điểm yếu",
+      reveal: "Xem đáp án gợi ý",
+      correct: "Tôi trả lời đúng",
+      wrong: "Chưa đúng",
+      empty: "Hết câu cần ôn hôm nay 🎉",
+      emptyHint: "Quay lại khi tới lịch ôn, hoặc clear thêm node để có thêm câu.",
+      noCleared: "Chưa có câu nào — hãy clear ít nhất 1 node để bắt đầu ôn.",
+      progress: (a, b) => `Câu ${a}/${b}`,
+      close: "Đóng",
+    },
   },
   en: {
     eyebrow: "Solution Architect · Career Track",
@@ -230,6 +260,21 @@ export const UI: Record<Lang, UIStrings> = {
       syncedLabel: "Synced",
       syncingLabel: "Syncing…",
       localLabel: "Local",
+    },
+    quiz: {
+      open: "Review",
+      title: "Review (spaced repetition)",
+      due: "Due",
+      mastered: "Mastered",
+      weak: "Weak",
+      reveal: "Show suggested answer",
+      correct: "I got it right",
+      wrong: "Not yet",
+      empty: "No cards due today 🎉",
+      emptyHint: "Come back when reviews are due, or clear more nodes to add cards.",
+      noCleared: "No cards yet — clear at least one node to start reviewing.",
+      progress: (a, b) => `Card ${a}/${b}`,
+      close: "Close",
     },
   },
 };

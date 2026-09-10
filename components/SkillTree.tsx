@@ -5,6 +5,8 @@ import { type SkillNode, type Lang } from "@/lib/content";
 import { getData, UI, type UIStrings } from "@/lib/i18n";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { useProgress } from "@/lib/useProgress";
+import { useQuiz } from "@/lib/useQuiz";
+import QuizPanel from "@/components/QuizPanel";
 
 const LANG_KEY = "sa-lang";
 
@@ -16,6 +18,8 @@ function rankFor(xp: number, ranks: [number, string][]): [number, string] {
 
 export default function SkillTree() {
   const { cleared, clearNode, reset, user, status, signIn, signOut } = useProgress();
+  const quiz = useQuiz(user);
+  const [quizOpen, setQuizOpen] = useState(false);
   const [lang, setLang] = useState<Lang>("vi");
   const [selected, setSelected] = useState<SkillNode | null>(null);
   const [toast, setToast] = useState<{ html: string; show: boolean }>({ html: "", show: false });
@@ -61,6 +65,7 @@ export default function SkillTree() {
   const barPct = nextRank
     ? Math.min(100, Math.round(((xp - rank[0]) / (nextRank[0] - rank[0])) * 100))
     : 100;
+  const dueCount = quiz.ready ? quiz.stats(NODES, cleared).due : 0;
 
   // Keep the drawer's node in sync with the active language.
   const selectedLocalized = selected ? nodeById.get(selected.id) ?? null : null;
@@ -128,6 +133,10 @@ export default function SkillTree() {
                 {doneCount} / {NODES.length}
               </span>
             </div>
+            <button className="btn quizbtn" onClick={() => setQuizOpen(true)}>
+              🎯 {ui.quiz.open}
+              {dueCount > 0 && <span className="qbadge">{dueCount}</span>}
+            </button>
             <div className="langtoggle" role="group" aria-label="Language">
               <button className={lang === "vi" ? "on" : ""} onClick={() => changeLang("vi")}>
                 VI
@@ -230,6 +239,15 @@ export default function SkillTree() {
         onClose={() => setSelected(null)}
         onClear={onClear}
         ui={ui}
+      />
+
+      <QuizPanel
+        open={quizOpen}
+        onClose={() => setQuizOpen(false)}
+        nodes={NODES}
+        cleared={cleared}
+        ui={ui}
+        quiz={quiz}
       />
 
       <div
