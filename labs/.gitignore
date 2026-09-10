@@ -1,0 +1,3 @@
+# deps do container npm install sinh ra qua bind mount
+api/node_modules/
+api/package-lock.json
